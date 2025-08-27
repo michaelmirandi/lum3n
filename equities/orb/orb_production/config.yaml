@@ -1,0 +1,66 @@
+# ORB Trading System Configuration
+# Matches exact parameters from orb_daily_signals_final.ipynb
+
+# Basic ORB Parameters
+orb_minutes: 20  # CRITICAL: 20-minute ORB (not 15!)
+use_volume_filter: true
+atr_multiplier: 2.5  # From notebook
+max_hold_minutes: 120
+risk_per_trade: 1000.0
+one_trade_per_day: true
+use_confidence_filter: false
+min_confidence_level: "MEDIUM"
+
+# Technical Indicator Parameters
+rsi_period: 14
+ema_period: 9
+volume_ma_period: 20
+
+# Capital and Market Hours
+initial_capital: 100000.0
+market_open: "09:30"
+market_close: "16:00"
+
+# Dynamic Stop Loss Parameters (from notebook)
+initial_atr_multiplier: 1.5  # Wide initial stop
+final_atr_multiplier: 0.5   # Narrow final stop
+narrowing_start_minutes: 45
+stop_update_frequency_minutes: 5
+
+# 4H Multi-Timeframe Confluence Parameters
+use_4h_confluence: true
+
+# 4H Indicator Settings
+rsi_4h_period: 14
+macd_4h_fast: 12
+macd_4h_slow: 26
+macd_4h_signal: 9
+
+# 4H RSI Confluence Thresholds - From backtesting system
+rsi_4h_bullish_min: 40.0      # Minimum for bullish bias
+rsi_4h_bullish_max: 70.0      # Maximum before overbought
+rsi_4h_bearish_min: 30.0      # Minimum before oversold  
+rsi_4h_bearish_max: 60.0      # Maximum for bearish bias
+
+# 4H MACD Requirements
+require_macd_4h_alignment: true
+
+# Enhanced Confidence Scoring Weights
+confidence_4h_rsi_weight: 2.0      # Max points from 4H RSI
+confidence_4h_macd_weight: 1.5     # Max points from 4H MACD
+confidence_4h_max_total: 5.5       # Cap total 4H contribution
+
+# Enhanced Confidence Level Thresholds (5M base + 4H confluence: ~13 max total)
+confidence_high_threshold: 6.0     # High confidence for options trading
+confidence_medium_threshold: 4.0   # Medium confidence threshold
+confidence_low_threshold: 0.0      # Minimum threshold
+
+# Entry Window Parameters (from notebook)
+entry_window_minutes: 60  # 60-minute window after market open for entries
+orb_completion_buffer_minutes: 0  # No buffer - entries start right after ORB
+
+# Live Trading Parameters
+client_id_start: 200
+client_id_max_retries: 10
+connection_timeout_seconds: 30
+data_cache_days: 30
