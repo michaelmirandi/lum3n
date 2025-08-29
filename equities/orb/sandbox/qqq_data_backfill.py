@@ -132,6 +132,7 @@ class QQQDataBackfill:
             # Calculate end date for this chunk
             chunk_end = current_date - timedelta(days=chunk_num * chunk_days)
             end_date_str = chunk_end.strftime('%Y%m%d %H:%M:%S')
+            print(end_date_str, 'end_date_str')
             
             # Fetch this chunk
             df_chunk = await self.fetch_data_chunk(
@@ -145,8 +146,8 @@ class QQQDataBackfill:
             
             # Rate limiting - wait between requests
             if chunk_num < num_chunks - 1:  # Don't wait after last chunk
-                print(f"  ⏳ Waiting 2 seconds before next chunk...")
-                await asyncio.sleep(2)
+                print(f"  ⏳ Waiting 1 seconds before next chunk...")
+                await asyncio.sleep(1)
         
         # Combine all chunks
         if all_data:
@@ -184,9 +185,9 @@ async def main():
         # Backfill parameters - adjust based on IBKR limits
         backfill_params = [
             # (bar_size, total_days, chunk_days, filename)
-            ('1 min', 90, 2, 'qqq_1m_backfill.csv'),      # 30 days in 2-day chunks
-            ('5 mins', 90, 5, 'qqq_5m_backfill.csv'),     # 60 days in 5-day chunks  
-            ('4 hours', 120, 10, 'qqq_4h_backfill.csv'),  # 180 days in 30-day chunks
+            ('1 min', 20, 2, 'qqq_1m_backfill.csv'),      # 30 days in 2-day chunks
+            ('5 mins', 20, 5, 'qqq_5m_backfill.csv'),     # 60 days in 5-day chunks  
+            ('4 hours', 20, 10, 'qqq_4h_backfill.csv'),  # 180 days in 30-day chunks
         ]
         
         # Process each timeframe

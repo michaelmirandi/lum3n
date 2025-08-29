@@ -87,8 +87,8 @@ class DataCache:
                     
                     # Rate limiting (crucial for IBKR)
                     if chunk_num < num_chunks - 1:
-                        print(f"    ⏳ Waiting 2 seconds...")
-                        await asyncio.sleep(2)
+                        print(f"    ⏳ Waiting 1 seconds...")
+                        await asyncio.sleep(1)
                         
                 except Exception as e:
                     print(f"    ❌ Error fetching chunk: {e}")

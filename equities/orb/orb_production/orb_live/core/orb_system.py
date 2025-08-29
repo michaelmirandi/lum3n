@@ -197,7 +197,8 @@ class ORBIndicator:
         
     def _calculate_indicators(self):
         """Calculate all technical indicators for all timeframes"""
-        print("🔧 Calculating technical indicators...")
+        import time
+        start_time = time.time()
         
         # Calculate indicators for 1-minute data
         self._calculate_rsi(self.df_1m, period=self.config.rsi_period)
@@ -216,7 +217,8 @@ class ORBIndicator:
         if self.config.use_4h_confluence:
             self._calculate_4h_indicators()
         
-        print("✅ All indicators calculated successfully")
+        elapsed_time = time.time() - start_time
+        print(f"✅ All indicators calculated successfully ({elapsed_time:.2f}s)")
         
     def _calculate_rsi(self, df: pd.DataFrame, period: int = 14):
         """Calculate RSI indicator"""
@@ -260,7 +262,6 @@ class ORBIndicator:
     
     def _calculate_4h_indicators(self):
         """Calculate 4H timeframe indicators for multi-timeframe confluence"""
-        print("🔧 Calculating 4H confluence indicators...")
         
         # Calculate 4H RSI
         self._calculate_rsi(self.df_4h, period=self.config.rsi_4h_period)
@@ -273,9 +274,7 @@ class ORBIndicator:
         
         # Calculate 4H Moving Average for distance analysis
         self._calculate_ema(self.df_4h, period=20, column_name='ema_20')
-        
-        print(f"✅ 4H indicators calculated for {len(self.df_4h)} bars")
-    
+            
     def calculate_orb(self, date: pd.Timestamp) -> Dict[str, float]:
         """Calculate Opening Range for a specific date"""
         date_str = date.date()
@@ -405,7 +404,7 @@ class ORBIndicator:
             orb_end = market_open + timedelta(minutes=self.config.orb_minutes)  # 9:50 AM
             entry_window_end = market_open + timedelta(minutes=60)  # 10:30 AM
             
-            # Must be after ORB completion but within 60 minutes of market open
+            # Must be at or after ORB completion (9:50) but within 60 minutes of market open
             if timestamp < orb_end or timestamp > entry_window_end:
                 return False
             
@@ -725,19 +724,21 @@ class ORBIndicator:
             # Initial wide stop loss
             initial_stop = entry_price - (atr_value * self.config.initial_atr_multiplier)
             
-            # Take profit levels using Fibonacci extensions
-            tp1 = entry_price + (orb_range * 1.272)  # 127.2% extension
-            tp2 = entry_price + (orb_range * 1.618)  # 161.8% extension
-            tp3 = entry_price + (orb_range * 2.0)    # 200% extension
+            # Take profit levels using Fibonacci extensions - FIXED: Use ORB LOW as base (matches backtesting)
+            orb_low = self.calculate_orb(timestamp)['orb_low']
+            tp1 = orb_low + (orb_range * 1.272)  # 127.2% extension from ORB LOW
+            tp2 = orb_low + (orb_range * 1.618)  # 161.8% extension from ORB LOW
+            tp3 = orb_low + (orb_range * 2.0)    # 200% extension from ORB LOW
             
         else:  # SHORT
             # Initial wide stop loss
             initial_stop = entry_price + (atr_value * self.config.initial_atr_multiplier)
             
-            # Take profit levels using Fibonacci extensions
-            tp1 = entry_price - (orb_range * 1.272)
-            tp2 = entry_price - (orb_range * 1.618)
-            tp3 = entry_price - (orb_range * 2.0)
+            # Take profit levels using Fibonacci extensions - FIXED: Use ORB HIGH as base (matches backtesting)
+            orb_high = self.calculate_orb(timestamp)['orb_high']
+            tp1 = orb_high - (orb_range * 1.272)  # 127.2% extension from ORB HIGH
+            tp2 = orb_high - (orb_range * 1.618)  # 161.8% extension from ORB HIGH
+            tp3 = orb_high - (orb_range * 2.0)    # 200% extension from ORB HIGH
         
         return {
             'stop_loss': initial_stop,
@@ -747,6 +748,145 @@ class ORBIndicator:
             'atr_value': atr_value,
             'orb_range': orb_range
         }
+    
+    def scan_for_daily_signal(self, date: pd.Timestamp, up_to_time: pd.Timestamp = None) -> Optional[Dict]:
+        """
+        Scan entire trading day for the FIRST valid ORB breakout signal within 60-minute window
+        Only checks COMPLETED candles (not the current forming candle)
+        
+        Args:
+            date: Date to scan for signals
+            up_to_time: Only check candles that closed before this time (for live monitoring)
+        
+        Returns signal details or None if no signal found
+        """
+        try:
+            date_str = date.date()
+            
+            # Calculate ORB levels for this date
+            orb_levels = self.calculate_orb(date)
+            if np.isnan(orb_levels['orb_high']):
+                return None
+            
+            # Get data for this day
+            day_data = self.df_1m[self.df_1m['date_only'] == date_str]
+            if day_data.empty:
+                return None
+            
+            # Define critical times - candle timestamps = START times
+            market_open = pd.Timestamp(datetime.combine(date_str, self.config.market_open))
+            orb_period_end = market_open + timedelta(minutes=self.config.orb_minutes)  # 9:50 AM
+            entry_window_end = market_open + timedelta(minutes=60)  # 10:30 AM
+            
+            # Get post-ORB data WITHIN 60-MINUTE WINDOW (starting from 9:50)
+            post_orb_data = day_data[
+                (day_data.index >= orb_period_end) & 
+                (day_data.index <= entry_window_end)
+            ]
+            
+            # If up_to_time specified, only check completed candles before that time
+            if up_to_time is not None:
+                # Subtract 1 minute to ensure we only check completed candles
+                completed_candle_time = up_to_time - timedelta(minutes=1)
+                
+                # Ensure timezone compatibility for comparison
+                if hasattr(completed_candle_time, 'tz') and completed_candle_time.tz is not None:
+                    # up_to_time is timezone-aware, make sure index is comparable
+                    if post_orb_data.index.tz is None:
+                        # Convert timezone-naive index to UTC for comparison
+                        comparison_time = completed_candle_time.tz_convert('UTC').replace(tzinfo=None)
+                    else:
+                        comparison_time = completed_candle_time
+                else:
+                    # up_to_time is timezone-naive
+                    comparison_time = completed_candle_time
+                    
+                post_orb_data = post_orb_data[post_orb_data.index <= comparison_time]
+            
+            if post_orb_data.empty:
+                return None
+            
+            # Look for FIRST breakout after ORB completes (exact notebook logic)
+            for timestamp in post_orb_data.index:
+                row = post_orb_data.loc[timestamp]
+                
+                # Check for LONG signal (break above ORB high)
+                if row['high'] > orb_levels['orb_high'] and row['close'] > orb_levels['orb_high']:
+                    # Calculate confidence score
+                    confidence_score, confidence_level = self.calculate_confidence_score(timestamp, TradeDirection.LONG)
+                    
+                    return {
+                        'date': date_str,
+                        'time': timestamp,
+                        'type': 'LONG',
+                        'direction': TradeDirection.LONG,
+                        'trigger_level': orb_levels['orb_high'],
+                        'entry_price': row['close'],  # 1m close price
+                        'orb_high': orb_levels['orb_high'],
+                        'orb_low': orb_levels['orb_low'],
+                        'orb_range': orb_levels['orb_range'],
+                        'volume': row['volume'],
+                        'rsi': row.get('rsi', np.nan),
+                        'confidence_score': confidence_score,
+                        'confidence_level': confidence_level.value,
+                        'breakout_pct': ((row['close'] - orb_levels['orb_high']) / orb_levels['orb_range'] * 100),
+                        'minutes_after_open': (timestamp - market_open).total_seconds() / 60
+                    }
+                
+                # Check for SHORT signal (break below ORB low)
+                elif row['low'] < orb_levels['orb_low'] and row['close'] < orb_levels['orb_low']:
+                    # Calculate confidence score
+                    confidence_score, confidence_level = self.calculate_confidence_score(timestamp, TradeDirection.SHORT)
+                    
+                    return {
+                        'date': date_str,
+                        'time': timestamp,
+                        'type': 'SHORT',
+                        'direction': TradeDirection.SHORT,
+                        'trigger_level': orb_levels['orb_low'],
+                        'entry_price': row['close'],  # 1m close price
+                        'orb_high': orb_levels['orb_high'],
+                        'orb_low': orb_levels['orb_low'],
+                        'orb_range': orb_levels['orb_range'],
+                        'volume': row['volume'],
+                        'rsi': row.get('rsi', np.nan),
+                        'confidence_score': confidence_score,
+                        'confidence_level': confidence_level.value,
+                        'breakout_pct': ((orb_levels['orb_low'] - row['close']) / orb_levels['orb_range'] * 100),
+                        'minutes_after_open': (timestamp - market_open).total_seconds() / 60
+                    }
+            
+            # No signal found
+            return None
+            
+        except Exception as e:
+            print(f"Warning: Error scanning for daily signal on {date}: {e}")
+            return None
+    
+    def scan_multiple_days(self, days: int = 5) -> List[Dict]:
+        """
+        Scan the last N trading days for signals
+        Returns list of all signals found
+        """
+        try:
+            # Get recent trading dates
+            unique_dates = self.df_1m['date_only'].unique()
+            trading_dates = sorted([d for d in unique_dates if pd.Timestamp(d).weekday() < 5])
+            
+            # Get last N days
+            recent_dates = trading_dates[-days:] if len(trading_dates) >= days else trading_dates
+            
+            signals = []
+            for date in recent_dates:
+                signal = self.scan_for_daily_signal(pd.Timestamp(date))
+                if signal:
+                    signals.append(signal)
+            
+            return signals
+            
+        except Exception as e:
+            print(f"Warning: Error scanning multiple days: {e}")
+            return []
     
     def _get_rsi_slope_4h(self, timestamp: pd.Timestamp) -> float:
         """Calculate RSI slope over last 2-3 bars (8-12 hours) for momentum analysis"""

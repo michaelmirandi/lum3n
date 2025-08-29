@@ -1,0 +1,22 @@
+# ORB Trading System V2 - Simplified Fast Configuration
+
+# Basic ORB Parameters  
+orb_minutes: 20
+market_open: "09:30"
+market_close: "16:00"
+
+# Connection Settings
+ibkr_host: "127.0.0.1"
+ibkr_port: 7496
+client_id_start: 400
+
+# Data Settings
+symbols: ["QQQ"]
+historical_days: 5  # Days of historical data to load
+buffer_size: 500   # Max candles to keep in memory per timeframe
+
+# Candle Timing (CRITICAL)
+# - Candle timestamp = period START time
+# - 14:39 candle = 14:39:00 to 14:39:59 (1m)
+# - 14:40 candle = 14:40:00 to 14:44:59 (5m)
+candle_timing_mode: "period_start"

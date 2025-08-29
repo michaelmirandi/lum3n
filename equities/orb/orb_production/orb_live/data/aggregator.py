@@ -44,24 +44,33 @@ class CandleAggregator:
         # Track last price
         self.last_price[sym] = c
         
-        # LOG EVERY 5s BAR
-        ts_str = ts_utc.strftime("%Y-%m-%d %H:%M:%S")
-        col = GREEN if c > o else RED if c < o else YELL
-        print(f"5s  | {ts_str} | {sym:<5} "
-              f"O:{o:8.2f} H:{h:8.2f} L:{l:8.2f} "
-              f"C:{col}{c:8.2f}{RESET} V:{v:10.0f}")
+        # NORMALIZE TO EASTERN TIME IMMEDIATELY
+        import pytz
+        eastern = pytz.timezone('US/Eastern')
+        # Convert UTC timestamp to Eastern
+        ts_eastern = ts_utc.replace(tzinfo=pytz.UTC).astimezone(eastern).replace(tzinfo=None)
         
-        # Round down to minute for 1m aggregation
-        min_key = ts_utc.replace(second=0, microsecond=0)
+        # LOG EVERY 5s BAR in Eastern
+        # ts_str = ts_eastern.strftime("%Y-%m-%d %H:%M:%S")
+        # col = GREEN if c > o else RED if c < o else YELL
+        # print(f"5s  | {ts_str} | {sym:<5} "
+        #       f"O:{o:8.2f} H:{h:8.2f} L:{l:8.2f} "
+        #       f"C:{col}{c:8.2f}{RESET} V:{v:10.0f}")
         
-        # Check if we need to close out larger timeframe candles
-        self._check_larger_timeframes(sym, min_key)
+        # Round down to minute for 1m aggregation - use Eastern time
+        min_key = ts_eastern.replace(second=0, microsecond=0)
         
         # 1 Minute candle aggregation
         st = self.state_1m.get(sym)
         if st is None or st["minute"] != min_key:
             if st is not None:
+                # Finalize completed 1m candle
                 self._finalize_and_store_1m(sym, st)
+                
+                # Check if this 1m completion triggers 5m/4h completion
+                self._check_timeframe_completion_on_1m_close(sym, st)
+                
+                # Always aggregate into ongoing 5m candle
                 self._aggregate_5m(sym, st)
             self.state_1m[sym] = {
                 "minute": min_key, "o": o, "h": h, 
@@ -73,26 +82,27 @@ class CandleAggregator:
             st["l"] = min(st["l"], l)
             st["v"] += v
     
-    def _check_larger_timeframes(self, sym: str, min_key: datetime):
-        """Check if we need to close out 5m, 15m, 4h candles"""
-        # Check 5m
-        if min_key.minute % 5 == 0 and min_key.second == 0:
+    def _check_timeframe_completion_on_1m_close(self, sym: str, completed_1m_candle: dict):
+        """Check if the completed 1m candle triggers 5m or 4h candle completion"""
+        completed_minute = completed_1m_candle["minute"]
+        
+        # Check if this 1m completion ends a 5m period
+        # 5m periods: 9:30-9:34, 9:35-9:39, etc.
+        # So completion at 9:34 should finalize the 9:30-9:34 period
+        next_minute = completed_minute + timedelta(minutes=1)
+        if next_minute.minute % 5 == 0:  # Next minute starts new 5m period
             st5 = self.state_5m.get(sym)
-            if st5 and st5["minute"] != min_key:
+            if st5:  # Only finalize if we have a 5m candle to finalize
                 self._finalize_and_store_5m(sym, st5)
                 self._aggregate_15m(sym, st5)
         
-        # Check 15m
-        if min_key.minute % 15 == 0 and min_key.second == 0:
-            st15 = self.state_15m.get(sym)
-            if st15 and st15["minute"] != min_key:
-                self._finalize_and_store_15m(sym, st15)
-                self._aggregate_4h(sym, st15)
-        
-        # Check 4h
-        if min_key.hour % 4 == 0 and min_key.minute == 0 and min_key.second == 0:
+        # Check if this 1m completion ends a 4h period  
+        # 4h periods: 4:00-7:59, 8:00-11:59, etc.
+        # So completion at 7:59 should finalize the 4:00-7:59 period
+        next_minute = completed_minute + timedelta(minutes=1)
+        if next_minute.hour % 4 == 0 and next_minute.minute == 0:  # Next minute starts new 4h period
             st4h = self.state_4h.get(sym)
-            if st4h and st4h["hour"] != min_key.replace(minute=0):
+            if st4h:  # Only finalize if we have a 4h candle to finalize
                 self._finalize_and_store_4h(sym, st4h)
     
     def _aggregate_5m(self, sym: str, one_min_candle: dict):
@@ -167,11 +177,6 @@ class CandleAggregator:
         """Log and store completed 5m candle in DataFrame"""
         self._log(sym, candle, "5m")
         self._append_to_dataframe(sym, candle, self.df_5m, "5m")
-    
-    def _finalize_and_store_15m(self, sym: str, candle: dict):
-        """Log and store completed 15m candle in DataFrame"""
-        self._log(sym, candle, "15m")
-        self._append_to_dataframe(sym, candle, self.df_15m, "15m")
     
     def _finalize_and_store_4h(self, sym: str, candle: dict):
         """Log and store completed 4h candle in DataFrame"""
@@ -249,10 +254,6 @@ class CandleAggregator:
             if sym in self.state_5m:
                 self._finalize_and_store_5m(sym, self.state_5m[sym])
                 self._aggregate_15m(sym, self.state_5m[sym])
-        
-        for sym in list(self.state_15m.keys()):
-            if sym in self.state_15m:
-                self._finalize_and_store_15m(sym, self.state_15m[sym])
         
         self.state_1m.clear()
         self.state_5m.clear()

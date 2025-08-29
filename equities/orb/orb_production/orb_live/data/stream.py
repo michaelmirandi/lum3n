@@ -143,7 +143,7 @@ class LiveDataStream:
                 self.contracts[symbol],
                 5,  # 5-second bars
                 'TRADES',
-                useRTH=False,  # Include pre/post market
+                useRTH=True,  # Include pre/post market
                 realTimeBarsOptions=[]
             )
             
@@ -168,7 +168,7 @@ class LiveDataStream:
         self.aggregator.on_bar_5s(
             symbol,
             ts_utc,
-            float(bar.open),
+            float(bar.open_),
             float(bar.high),
             float(bar.low),
             float(bar.close),
@@ -186,6 +186,13 @@ class LiveDataStream:
         # Merge with existing DataFrames (historical + new live data)
         if not agg_1m.empty:
             if symbol in self.df_1m and not self.df_1m[symbol].empty:
+                # Ensure timezone consistency in existing DataFrame first
+                existing_tz = getattr(self.df_1m[symbol]['date'].dtype, 'tz', None)
+                new_tz = getattr(agg_1m['date'].dtype, 'tz', None)
+                if existing_tz is None and new_tz is not None:
+                    # Convert existing data to match new data timezone
+                    self.df_1m[symbol]['date'] = pd.to_datetime(self.df_1m[symbol]['date']).dt.tz_localize('UTC')
+                
                 # Find last timestamp in main DataFrame
                 last_time = self.df_1m[symbol]['date'].max()
                 # Append only new data
@@ -200,6 +207,13 @@ class LiveDataStream:
         # Same for 5m
         if not agg_5m.empty:
             if symbol in self.df_5m and not self.df_5m[symbol].empty:
+                # Ensure timezone consistency in existing DataFrame first
+                existing_tz = getattr(self.df_5m[symbol]['date'].dtype, 'tz', None)
+                new_tz = getattr(agg_5m['date'].dtype, 'tz', None)
+                if existing_tz is None and new_tz is not None:
+                    # Convert existing data to match new data timezone
+                    self.df_5m[symbol]['date'] = pd.to_datetime(self.df_5m[symbol]['date']).dt.tz_localize('UTC')
+                
                 last_time = self.df_5m[symbol]['date'].max()
                 new_data = agg_5m[agg_5m['date'] > last_time]
                 if not new_data.empty:
@@ -212,6 +226,13 @@ class LiveDataStream:
         # Same for 4h
         if not agg_4h.empty:
             if symbol in self.df_4h and not self.df_4h[symbol].empty:
+                # Ensure timezone consistency in existing DataFrame first
+                existing_tz = getattr(self.df_4h[symbol]['date'].dtype, 'tz', None)
+                new_tz = getattr(agg_4h['date'].dtype, 'tz', None)
+                if existing_tz is None and new_tz is not None:
+                    # Convert existing data to match new data timezone
+                    self.df_4h[symbol]['date'] = pd.to_datetime(self.df_4h[symbol]['date']).dt.tz_localize('UTC')
+                
                 last_time = self.df_4h[symbol]['date'].max()
                 new_data = agg_4h[agg_4h['date'] > last_time]
                 if not new_data.empty:
@@ -222,11 +243,12 @@ class LiveDataStream:
                 self.df_4h[symbol] = agg_4h.copy()
     
     def get_dataframes(self, symbol: str) -> tuple:
-        """Get current DataFrames for a symbol"""
+        """Get current DataFrames for a symbol - already in Eastern timezone from aggregator"""
+        # Data is already normalized to Eastern in aggregator, just return copies
         return (
-            self.df_1m.get(symbol, pd.DataFrame()),
-            self.df_5m.get(symbol, pd.DataFrame()),
-            self.df_4h.get(symbol, pd.DataFrame())
+            self.df_1m.get(symbol, pd.DataFrame()).copy(),
+            self.df_5m.get(symbol, pd.DataFrame()).copy(),
+            self.df_4h.get(symbol, pd.DataFrame()).copy()
         )
     
     def get_latest_price(self, symbol: str) -> Optional[float]:
